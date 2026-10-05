@@ -9,21 +9,21 @@ import { mkdirSync, existsSync } from 'fs'
 const MAX_OUTPUT = 20_000   // chars
 const TIMEOUT_MS = 15_000   // 15s hard cap per command
 
-// Sandbox dir per session — lives in OS temp, cleaned by OS
+// Sandbox dir per session - lives in OS temp, cleaned by OS
+// On Vercel (Linux), tmpdir() returns /tmp which is the only writable dir
 function sessionDir(sessionId: string): string {
   const dir = join(tmpdir(), 'aura-sandbox', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_'))
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return dir
 }
 
-// Blocked patterns — prevent escaping the sandbox dir
-const BLOCKED = [
+// Blocked patterns - cross-platform (Windows PowerShell + Linux bash / Vercel)
+const BLOCKED: RegExp[] = [
   /rm\s+-rf\s+\//i,
   /rm\s+-rf\s+~/i,
   /del\s+\/[sS]\s+/i,
   /format\s+[a-z]:/i,
   /rmdir\s+\/[sS]/i,
-  /:\s*\{\s*:\s*\|\s*:\s*\}/,
   /while\s+true\s*;?\s*do/i,
   /(curl|wget|Invoke-WebRequest)\s+.*\|\s*(bash|sh|pwsh|cmd|python|node)/i,
   /sudo\s+(su|bash|sh|passwd|visudo)/i,
@@ -33,11 +33,6 @@ const BLOCKED = [
   /\b(nc|ncat|netcat)\s+.*-e\s+(bash|sh|cmd)/i,
   /cat\s+~\/\.(aws|ssh|gnupg)/i,
   /Get-Content\s+.*\.(aws|ssh)/i,
-]\s+/i, /format\s+[a-z]:/i,
-  /rmdir\s+\/[sS]/i, /:\s*{\s*:\s*\|\s*:}/,   // fork bomb
-  /(curl|wget|Invoke-WebRequest)\s+.*\|\s*(bash|sh|pwsh|cmd)/i,
-  /net\s+(user|localgroup)\s+.*\/add/i,          // add user
-  /reg\s+(add|delete)\s+hklm/i,                  // registry writes
 ]
 
 export async function POST(req: NextRequest) {
@@ -53,14 +48,14 @@ export async function POST(req: NextRequest) {
     // Block dangerous patterns
     for (const pattern of BLOCKED) {
       if (pattern.test(command)) {
-        return NextResponse.json({ error: `Command blocked for safety: matches disallowed pattern.`, output: '', exitCode: -1 }, { status: 200 })
+        return NextResponse.json({ error: 'Command blocked for safety: matches disallowed pattern.', output: '', exitCode: -1 }, { status: 200 })
       }
     }
 
     const cwd = sessionDir(sessionId)
     const isWindows = process.platform === 'win32'
 
-    // Run in PowerShell (Windows) or bash (Linux/Mac)
+    // Run in PowerShell (Windows) or bash (Linux/Vercel)
     const [shell, shellArgs] = isWindows
       ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command]]
       : ['bash', ['-c', command]]
