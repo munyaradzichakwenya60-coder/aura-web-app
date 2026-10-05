@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     const output = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
       let stdout = ''
       let stderr = ''
-      const proc = spawn(shell, shellArgs, { cwd, env: { ...process.env, PATH: process.env.PATH }, timeout: TIMEOUT_MS })
+      const proc = spawn(/*turbopackIgnore: true*/ shell, shellArgs, { cwd, env: { ...process.env, PATH: process.env.PATH }, timeout: TIMEOUT_MS })
 
       proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); if (stdout.length > MAX_OUTPUT) proc.kill() })
       proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); if (stderr.length > MAX_OUTPUT) proc.kill() })
