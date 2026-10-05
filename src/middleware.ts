@@ -6,7 +6,6 @@ export async function middleware(request: NextRequest) {
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
   // If Supabase env vars are not configured, let all requests through.
-  // This allows the app to load and show a useful error rather than a 500.
   if (!url || !key) {
     return NextResponse.next({ request })
   }
@@ -28,10 +27,11 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  // getSession() is fine in middleware for routing decisions.
-  // The real security boundary is in individual route handlers / server components.
-  const { data: { session } } = await supabase.auth.getSession()
-  const isAuthenticated = Boolean(session)
+  // IMPORTANT: Use getUser() not getSession() -- getUser() validates the JWT
+  // with the Supabase auth server on every request, preventing session spoofing
+  // or cached sessions leaking to other users on shared edge infrastructure.
+  const { data: { user } } = await supabase.auth.getUser()
+  const isAuthenticated = Boolean(user)
 
   const { pathname } = request.nextUrl
   const isAuthRoute = pathname.startsWith('/auth')
@@ -44,7 +44,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl)
   }
 
-  // Authenticated users hitting /auth are sent straight to the app
+  // Authenticated users hitting /auth are sent to the app
   if (isAuthenticated && isAuthRoute && pathname !== '/auth/reset') {
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/'
