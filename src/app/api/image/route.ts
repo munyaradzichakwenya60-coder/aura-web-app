@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { requireUser, rateLimited } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -150,15 +151,28 @@ async function generateWithPollinations(prompt: string, seed: string, width: str
   }
 }
 
+// Whole numbers only, clamped. These values are pasted into an upstream URL, so a raw
+// string like "512&model=x" would let a caller inject extra query parameters.
+function dimension(raw: string | null, fallback: number): string {
+  const n = parseInt(raw ?? '', 10)
+  return String(Number.isFinite(n) ? Math.min(1536, Math.max(256, n)) : fallback)
+}
+
 export async function GET(req: NextRequest) {
-  const rawPrompt = req.nextUrl.searchParams.get('prompt')
+  const auth = await requireUser(req)
+  if (auth.response) return auth.response
+  if (rateLimited(`image:${auth.user.id}`, 20, 60_000)) {
+    return NextResponse.json({ error: 'Too many image requests. Please wait a moment.' }, { status: 429 })
+  }
+
+  const rawPrompt = req.nextUrl.searchParams.get('prompt')?.slice(0, 1000)
   if (!rawPrompt) return NextResponse.json({ error: 'Missing prompt' }, { status: 400 })
 
   const subject = cleanPrompt(rawPrompt)
-  const rawSeed = parseInt(req.nextUrl.searchParams.get('seed') ?? String(Date.now()), 10)
-  const seed = String(rawSeed % 2147483647)
-  const width = req.nextUrl.searchParams.get('w') ?? '1024'
-  const height = req.nextUrl.searchParams.get('h') ?? '768'
+  const parsedSeed = parseInt(req.nextUrl.searchParams.get('seed') ?? '', 10)
+  const seed = String((Number.isFinite(parsedSeed) ? Math.abs(parsedSeed) : Date.now()) % 2147483647)
+  const width = dimension(req.nextUrl.searchParams.get('w'), 1024)
+  const height = dimension(req.nextUrl.searchParams.get('h'), 768)
 
   // Enhance prompt via local LLM (max 8s, non-blocking fallback)
   const prompt = await enhancePrompt(subject, req.signal)
@@ -176,7 +190,7 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': contentType,
           'Content-Length': String(buffer.byteLength),
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': 'private, max-age=31536000, immutable',
         },
       })
     }
@@ -191,7 +205,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': result.contentType,
         'Content-Length': String(result.buffer.byteLength),
-        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Cache-Control': 'private, max-age=31536000, immutable',
       },
     })
   }

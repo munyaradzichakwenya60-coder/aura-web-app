@@ -112,12 +112,15 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_key
 GEMINI_API_KEY=your_gemini_key
 HF_API_KEY=hf_your_huggingface_token
 OPENROUTER_API_KEY=your_openrouter_key   # optional, for Nemotron fallback
-NEXT_PUBLIC_ADMIN_EMAIL=your@email.com
+ADMIN_EMAIL=your@email.com                # owner: the only account allowed to use the sandbox
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key   # optional, enables policy-violation logging
+# ENABLE_SANDBOX=true                     # production only: switch on the server-side terminal (off by default)
 ```
 
 Run the Supabase migration in your dashboard SQL Editor:
 ```sql
 -- File: supabase/migration_user_profiles.sql
+-- Then:  supabase/migration_002_lock_profile_role.sql  (stops users from making themselves admin)
 ```
 
 ```bash
