@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { rateLimited, requireUser } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -60,6 +61,8 @@ Use the sandbox proactively whenever it adds value:
 When running commands via the sandbox, present the output inline in your response. Always specify the full filename as a comment on the first line of any code block so the user can save it. When providing code for an uploaded project, always apply the changes via the sandbox so the user can download the updated zip.`
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
+
+const NEMOTRON_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'
 type EnginePreference = 'auto' | 'local' | 'cloud'
 
 // Fetch web search results -- Google News RSS + DDG Instant Answer, parallel, 1.5s hard cap
@@ -154,6 +157,13 @@ function streamResponse(stream: ReadableStream<Uint8Array>, parse: (line: string
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req)
+  if (auth.response) return auth.response
+  const user = auth.user
+  if (rateLimited(`chat:${user.id}`, 30, 60_000)) {
+    return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 })
+  }
+
   try {
     const body = await req.json()
     const messages = body.messages as ChatMessage[] | undefined
@@ -170,7 +180,7 @@ export async function POST(req: NextRequest) {
     if (!['auto', 'local', 'cloud'].includes(engine)) {
       return NextResponse.json({ error: 'Invalid engine preference.' }, { status: 400 })
     }
-    if (messages.some(message => !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || message.content.length > 32_000)) {
+    if (messages.some(message => !message || typeof message !== 'object' || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string' || message.content.length > 32_000)) {
       return NextResponse.json({ error: 'Each message needs a supported role and content below 32,000 characters.' }, { status: 400 })
     }
 
@@ -185,9 +195,7 @@ export async function POST(req: NextRequest) {
     if (lastUserMessage) {
       const policy = checkContentPolicy(lastUserMessage.content)
       if (policy.blocked) {
-        // Extract user identity from auth header for logging (best-effort)
-        const authHeader = req.headers.get('authorization') || ''
-        void logPolicyViolation(null, null, lastUserMessage.content, policy.reason ?? 'unknown')
+        void logPolicyViolation(user.id === 'local-dev' ? null : user.id, user.email, lastUserMessage.content, policy.reason ?? 'unknown')
         const encoder = new TextEncoder()
         const refusal = "I can't help with that. This request falls outside what I'm designed to assist with — it may involve illegal activity, harm to others, or content that violates our usage policy. If you believe this is a mistake, please reach out to the platform administrator."
         const stream = new ReadableStream({
@@ -227,10 +235,11 @@ export async function POST(req: NextRequest) {
           parts: [{ text: m.content }],
         }))
         const gemini = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${geminiKey}`,
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            // Key goes in a header, not the URL, so it never ends up in logs or error messages.
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
             signal: req.signal,
             body: JSON.stringify({
               system_instruction: { parts: [{ text: systemPrompt }] },
@@ -244,7 +253,9 @@ export async function POST(req: NextRequest) {
             if (!line.startsWith('data: ')) return ''
             try {
               const json = JSON.parse(line.slice(6))
-              return json.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+              // Join every text part (skipping "thought" parts); the answer is not always parts[0].
+              const parts = (json.candidates?.[0]?.content?.parts ?? []) as { text?: string; thought?: boolean }[]
+              return parts.filter(p => !p.thought).map(p => p.text ?? '').join('')
             } catch { return '' }
           }, 'AURA · Gemini', req.signal)
         }
@@ -271,25 +282,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const useOpenRouter = Boolean(cloudApiKey || process.env.OPENROUTER_API_KEY)
-    const orKey = cloudApiKey || process.env.OPENROUTER_API_KEY || ''
+    const serverOrKey = process.env.OPENROUTER_API_KEY?.trim() ?? ''
+    const useOpenRouter = Boolean(cloudApiKey || serverOrKey)
+    const orKey = cloudApiKey || serverOrKey
 
-    // Nemotron fallback via OpenRouter -- used when model is 'nemotron-3-super:cloud'
-    // OR when no user cloud key is set (so Pollinations is the only other option)
     // Maps the friendly alias to the real OpenRouter model ID
     const nemotronAlias = model === 'nemotron-3-super:cloud'
-    const orModel = nemotronAlias
-      ? 'nvidia/nemotron-3-super-120b-a12b:free'
-      : (useOpenRouter ? model : 'openai-fast')
+    const requestedModel = nemotronAlias ? NEMOTRON_MODEL : model
+    // When the request is paid for by the server's own OpenRouter key, only free models are
+    // allowed. Otherwise any signed-in user could pick an expensive model on the owner's bill.
+    // Users who bring their own key can use whatever model they like.
+    const orModel = !useOpenRouter
+      ? 'openai-fast'
+      : cloudApiKey || requestedModel.endsWith(':free')
+        ? requestedModel
+        : NEMOTRON_MODEL
 
-    // Use OpenRouter with Nemotron as the auto cloud fallback when key is available
-    // and Gemini + Ollama both failed -- gives users a powerful 49B model at no cost
-    const cloudEndpoint = useOpenRouter || nemotronAlias
+    const cloudEndpoint = useOpenRouter
       ? 'https://openrouter.ai/api/v1/chat/completions'
       : 'https://text.pollinations.ai/openai/chat/completions'
 
     const cloudHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (useOpenRouter || (nemotronAlias && orKey)) {
+    if (useOpenRouter) {
       cloudHeaders['Authorization'] = `Bearer ${orKey}`
       cloudHeaders['HTTP-Referer'] = req.nextUrl.origin
       cloudHeaders['X-Title'] = 'AURA Web'
@@ -316,13 +330,14 @@ export async function POST(req: NextRequest) {
           const choice = JSON.parse(trimmed.slice(6)).choices?.[0]
           return choice?.delta?.content || choice?.text || ''
         } catch { return '' }
-      }, nemotronAlias ? 'AURA · Nemotron' : useOpenRouter ? 'AURA · Cloud' : 'AURA · Cloud', req.signal)
+      }, nemotronAlias ? 'AURA · Nemotron' : 'AURA · Cloud', req.signal)
     }
 
     const detail = await cloud.text().catch(() => '')
     return NextResponse.json({ error: `Cloud inference unavailable${detail ? `: ${detail.slice(0, 180)}` : ''}` }, { status: 502 })
   } catch (error: unknown) {
     if (error instanceof Error && error.name === 'AbortError') return NextResponse.json({ error: 'Request cancelled.' }, { status: 499 })
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Internal server error.' }, { status: 500 })
+    console.error('[chat] unexpected error:', error instanceof Error ? error.message : error)
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 }

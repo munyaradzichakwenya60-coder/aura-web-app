@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import React, { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getSupabaseConfig } from '@/lib/supabase/config'
 
 type Role = 'user' | 'assistant'
 type Engine = 'auto' | 'local' | 'cloud'
@@ -580,7 +581,7 @@ try {
                   <button onClick={() => setFullscreen(index)} className="flex items-center gap-1 text-xs" style={{ color: '#71717a' }}>{svg('M8 3H5a2 2 0 0 0-2 2v3|M21 8V5a2 2 0 0 0-2-2h-3|M3 16v3a2 2 0 0 0 2 2h3|M16 21h3a2 2 0 0 0 2-2v-3')} Fullscreen</button>
                 </div>
               </div>
-              <iframe srcDoc={previewDoc} sandbox="allow-scripts allow-same-origin allow-popups" className="w-full bg-white" style={{ height: isPy ? (usesGui ? 320 : 420) : 360, border: 'none', display: 'block' }} title="Preview" />
+              <iframe srcDoc={previewDoc} sandbox="allow-scripts allow-popups" className="w-full bg-white" style={{ height: isPy ? (usesGui ? 320 : 420) : 360, border: 'none', display: 'block' }} title="Preview" />
             </div>
           ) : (
             <pre className="overflow-x-auto p-4 text-xs leading-relaxed" style={{ background: theme === 'light' ? '#fafafa' : '#09090b', color: theme === 'light' ? '#18181b' : '#e4e4e7', margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', whiteSpace: 'pre', wordBreak: 'normal', overflowWrap: 'normal' }}><code>{cleanCode}</code></pre>
@@ -593,7 +594,7 @@ try {
                 <span className="font-mono text-sm text-white">{filename}</span>
                 <button onClick={() => setFullscreen(null)} className="flex items-center gap-1 text-sm text-white opacity-70 hover:opacity-100">{Icons.close} Close</button>
               </div>
-              <iframe srcDoc={previewDoc} sandbox="allow-scripts allow-same-origin" className="mx-4 mb-4 flex-1 rounded-xl bg-white" style={{ border: 'none' }} title="Preview Fullscreen" onClick={(e: React.MouseEvent) => e.stopPropagation()} />
+              <iframe srcDoc={previewDoc} sandbox="allow-scripts" className="mx-4 mb-4 flex-1 rounded-xl bg-white" style={{ border: 'none' }} title="Preview Fullscreen" onClick={(e: React.MouseEvent) => e.stopPropagation()} />
             </div>
           )}
         </div>
@@ -718,15 +719,20 @@ export default function AuraPage() {
         }
       } catch { /* profile table not yet set up */ }
     }
+    // The middleware is the real gate; this stops a signed-out visitor from ever seeing the app
+    // (for example from a cached page) whenever authentication is configured.
+    const authConfigured = Boolean(getSupabaseConfig())
     supabase.auth.getUser().then(({ data }) => {
       const u = data.user as SupabaseUser | null
       setUser(u)
       if (u) loadProfile(u)
-    })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      else if (authConfigured) window.location.replace('/auth')
+    }).catch(() => { if (authConfigured) window.location.replace('/auth') })
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       const u = session?.user as SupabaseUser | null
       setUser(u)
       if (u) loadProfile(u)
+      else if (event === 'SIGNED_OUT' && authConfigured) window.location.replace('/auth')
     })
     return () => listener.subscription.unsubscribe()
   }, [supabase])
@@ -774,14 +780,14 @@ export default function AuraPage() {
     showNotice('Saved to Library')
   }, [chats, currentChatId, showNotice])
 
-  const isAdmin = userProfile?.role === 'admin' || (user?.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL)
+  // UI hint only. Every privileged API call is checked again on the server.
+  const isAdmin = userProfile?.role === 'admin'
 
   const saveOnboarding = async () => {
     if (!user) return
     try {
       await supabase.from('user_profiles').upsert({
         id: user.id,
-        email: user.email,
         display_name: onboardName.trim() || userLabel,
         use_case: onboardUseCase || 'personal',
         onboarded: true,
@@ -1059,9 +1065,22 @@ export default function AuraPage() {
   }
 
   const signIn = async () => { window.location.href = '/auth' }
-  const signOut = async () => { const { error } = await supabase.auth.signOut(); if (error) showNotice(error.message); else { setUser(null); window.location.href = '/auth' } }
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) { showNotice(error.message); return }
+    // Do not leave the previous account's chats or personal API key behind for the next person on this browser.
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(LIBRARY_KEY)
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') as Record<string, unknown>
+      delete saved.cloudKey
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(saved))
+    } catch { /* storage unavailable */ }
+    setUser(null)
+    window.location.href = '/auth'
+  }
   const filteredChats = chats.filter(chat => `${chat.title} ${chat.messages.map(message => message.content).join(' ')}`.toLowerCase().includes(search.toLowerCase()))
-  const userLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Munyaradzi'
+  const userLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'there'
 
   // Omnibar rendered inline to keep textarea always mounted with stable ref
   const omnibarJsx = (docked: boolean) => <div className={`w-full rounded-2xl p-3 ${docked ? '' : 'max-w-2xl'}`} style={{ background: 'var(--bg-input)', border: `1px solid ${imageMode ? 'var(--accent-primary)' : showSandbox ? '#f59e0b' : 'var(--border-card)'}`, boxShadow: '0 8px 32px -4px rgba(0,0,0,.25)' }}>

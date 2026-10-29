@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -28,6 +28,18 @@ export default function AuthPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [focused, setFocused] = useState<string | null>(null)
+
+  // Error code passed in the URL (?error=...), read without a setState-in-effect.
+  const urlErrorCode = useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).get('error') ?? '',
+    () => '',
+  )
+  const urlError =
+    urlErrorCode === 'not_configured' ? 'Sign-in is not configured on this deployment yet. The site owner needs to add the Supabase environment variables.'
+    : urlErrorCode === 'auth_callback_failed' ? 'Sign-in did not complete. Please try again.'
+    : ''
+  const shownError = error || urlError
 
   useEffect(() => {
     // Client-side redirect: getSession() is fine here — the middleware
@@ -327,7 +339,7 @@ export default function AuthPage() {
               </div>
 
               {/* Feedback */}
-              {error && (
+              {shownError && (
                 <div style={{
                   padding: '10px 14px',
                   borderRadius: 9,
@@ -335,7 +347,7 @@ export default function AuthPage() {
                   background: '#FEF2F2',
                   border: '1px solid #FECACA',
                   color: '#DC2626',
-                }}>{error}</div>
+                }}>{shownError}</div>
               )}
               {success && (
                 <div style={{

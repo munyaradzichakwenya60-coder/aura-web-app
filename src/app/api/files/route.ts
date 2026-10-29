@@ -2,8 +2,9 @@ export const runtime = 'nodejs'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { join, relative, extname, dirname, basename } from 'path'
-import { tmpdir } from 'os'
 import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'fs'
+import { requireUser, rateLimited } from '@/lib/auth'
+import { sessionDir, resolveInside } from '@/lib/sandbox-path'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024  // 10MB per file
 const MAX_SESSION_SIZE = 50 * 1024 * 1024  // 50MB total
@@ -16,12 +17,6 @@ const TEXT_EXTS = new Set([
   '.php', '.rb', '.swift', '.kt', '.dart', '.r', '.sql', '.graphql', '.prisma',
   '.config', '.conf', '.ini', '.lock', '.gitignore', '.dockerignore', '.editorconfig',
 ])
-
-function sessionDir(sessionId: string): string {
-  const dir = join(tmpdir(), 'aura-sandbox', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_'))
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  return dir
-}
 
 function sessionSize(dir: string): number {
   let size = 0
@@ -58,17 +53,19 @@ function listFiles(dir: string, base: string): Array<{ path: string; size: numbe
 
 // ── GET /api/files?session=xxx — list files ──────────────────────────────────
 export async function GET(req: NextRequest) {
+  const auth = await requireUser(req)
+  if (auth.response) return auth.response
   const sessionId = req.nextUrl.searchParams.get('session') ?? ''
   const filePath = req.nextUrl.searchParams.get('path') ?? ''
   const action = req.nextUrl.searchParams.get('action') ?? 'list'
 
   if (!sessionId) return NextResponse.json({ error: 'session required' }, { status: 400 })
-  const dir = sessionDir(sessionId)
+  const dir = sessionDir(auth.user.id, sessionId)
 
   if (action === 'read' && filePath) {
-    const abs = join(dir, filePath.replace(/\.\./g, ''))
-    if (!abs.startsWith(dir)) return NextResponse.json({ error: 'Path traversal denied' }, { status: 400 })
-    if (!existsSync(abs)) return NextResponse.json({ error: 'File not found' }, { status: 404 })
+    const abs = resolveInside(dir, filePath)
+    if (!abs) return NextResponse.json({ error: 'Path traversal denied' }, { status: 400 })
+    if (!existsSync(abs) || !statSync(abs).isFile()) return NextResponse.json({ error: 'File not found' }, { status: 404 })
     const ext = extname(abs).toLowerCase()
     if (!TEXT_EXTS.has(ext)) return NextResponse.json({ error: 'Binary file — not readable as text' }, { status: 400 })
     const content = readFileSync(abs, 'utf8')
@@ -96,6 +93,11 @@ export async function GET(req: NextRequest) {
 
 // ── POST /api/files — upload files or write a single file ────────────────────
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req)
+  if (auth.response) return auth.response
+  if (rateLimited(`files:${auth.user.id}`, 120, 60_000)) {
+    return NextResponse.json({ error: 'Too many requests.' }, { status: 429 })
+  }
   const contentType = req.headers.get('content-type') ?? ''
 
   // JSON write: { session, path, content }
@@ -105,9 +107,16 @@ export async function POST(req: NextRequest) {
     if (!sessionId || !filePath || content === undefined)
       return NextResponse.json({ error: 'session, path, content required' }, { status: 400 })
 
-    const dir = sessionDir(sessionId)
-    const abs = join(dir, filePath.replace(/\.\./g, ''))
-    if (!abs.startsWith(dir)) return NextResponse.json({ error: 'Path traversal denied' }, { status: 400 })
+    if (typeof sessionId !== 'string' || typeof filePath !== 'string' || typeof content !== 'string')
+      return NextResponse.json({ error: 'session, path, content must be strings' }, { status: 400 })
+    if (Buffer.byteLength(content, 'utf8') > MAX_FILE_SIZE)
+      return NextResponse.json({ error: 'File too large' }, { status: 413 })
+
+    const dir = sessionDir(auth.user.id, sessionId)
+    const abs = resolveInside(dir, filePath)
+    if (!abs) return NextResponse.json({ error: 'Path traversal denied' }, { status: 400 })
+    if (sessionSize(dir) + Buffer.byteLength(content, 'utf8') > MAX_SESSION_SIZE)
+      return NextResponse.json({ error: 'Session storage limit reached' }, { status: 413 })
 
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, content, 'utf8')
@@ -116,10 +125,10 @@ export async function POST(req: NextRequest) {
 
   // Multipart: file uploads (including zips)
   const formData = await req.formData()
-  const sessionId = formData.get('session') as string
-  if (!sessionId) return NextResponse.json({ error: 'session required' }, { status: 400 })
+  const sessionId = formData.get('session')
+  if (typeof sessionId !== 'string' || !sessionId) return NextResponse.json({ error: 'session required' }, { status: 400 })
 
-  const dir = sessionDir(sessionId)
+  const dir = sessionDir(auth.user.id, sessionId)
   const written: string[] = []
 
   for (const [, value] of formData.entries()) {
@@ -137,21 +146,26 @@ export async function POST(req: NextRequest) {
       try {
         const AdmZip = (await import('adm-zip')).default
         const zip = new AdmZip(buf)
+        // Budget on the *uncompressed* size so a small zip cannot expand into gigabytes.
+        let unpacked = sessionSize(dir)
         for (const entry of zip.getEntries()) {
           if (entry.isDirectory) continue
-          const entryName = entry.entryName.replace(/\.\./g, '').replace(/^\//, '')
-          const abs = join(dir, entryName)
-          if (!abs.startsWith(dir)) continue
+          const abs = resolveInside(dir, entry.entryName)
+          if (!abs) continue
+          const size = entry.header.size
+          if (size > MAX_FILE_SIZE || unpacked + size > MAX_SESSION_SIZE) continue
+          unpacked += size
           mkdirSync(dirname(abs), { recursive: true })
-          zip.extractEntryTo(entry, dirname(abs), false, true)
-          written.push(entryName)
+          writeFileSync(abs, entry.getData())
+          written.push(relative(dir, abs).replace(/\\/g, '/'))
         }
       } catch (e) {
         return NextResponse.json({ error: `Failed to unzip: ${e}` }, { status: 400 })
       }
     } else {
       // Plain file — write directly
-      const abs = join(dir, name)
+      const abs = resolveInside(dir, name)
+      if (!abs) continue
       writeFileSync(abs, buf)
       written.push(name)
     }
@@ -163,9 +177,11 @@ export async function POST(req: NextRequest) {
 
 // ── DELETE /api/files?session=xxx — clear session ────────────────────────────
 export async function DELETE(req: NextRequest) {
+  const auth = await requireUser(req)
+  if (auth.response) return auth.response
   const sessionId = req.nextUrl.searchParams.get('session') ?? ''
   if (!sessionId) return NextResponse.json({ error: 'session required' }, { status: 400 })
-  const dir = sessionDir(sessionId)
+  const dir = sessionDir(auth.user.id, sessionId)
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
   return NextResponse.json({ ok: true })
 }
