@@ -180,22 +180,3 @@ body {
 
 /* Never let focus or the keyboard scroll the app shell out of place */
 .app-root, .app-root > main { overflow: clip; }
-
-/* AURA orb: pure CSS, transparent, theme-aware */
-.orb { --orb-a: 255,120,190; --orb-b: 110,140,255; --orb-c: 160,110,255; --orb-rim: 150,120,255; --orb-glow: .28; position: relative; aspect-ratio: 1; border-radius: 9999px; isolation: isolate; filter: drop-shadow(0 0 18px rgba(var(--orb-rim), var(--orb-glow))); animation: orb-breathe 7s ease-in-out infinite; }
-[data-theme='dark'] .orb { --orb-a: 255,95,170; --orb-b: 90,130,255; --orb-c: 170,90,255; --orb-rim: 150,120,255; --orb-glow: .55; }
-.orb-core { position: absolute; inset: 0; border-radius: 9999px; overflow: hidden; background: radial-gradient(circle at 35% 30%, rgba(var(--orb-c), .10), transparent 65%); }
-.orb-blob { position: absolute; border-radius: 9999px; filter: blur(14px); will-change: transform; }
-[data-theme='dark'] .orb-blob { mix-blend-mode: screen; }
-.orb-blob.a { width: 58%; height: 58%; left: 8%; top: 30%; background: rgba(var(--orb-b), .75); animation: orb-a 9s ease-in-out infinite; }
-.orb-blob.b { width: 46%; height: 46%; left: 30%; top: 8%; background: rgba(var(--orb-a), .70); animation: orb-b 11s ease-in-out infinite; }
-.orb-blob.c { width: 40%; height: 40%; left: 46%; top: 44%; background: rgba(var(--orb-c), .60); animation: orb-c 13s ease-in-out infinite; }
-.orb-rim { position: absolute; inset: 0; border-radius: 9999px; padding: 2px; background: conic-gradient(from 0deg, rgb(var(--orb-a)), rgb(var(--orb-c)), rgb(var(--orb-b)), rgb(var(--orb-c)), rgb(var(--orb-a))); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: orb-spin 10s linear infinite; opacity: .85; }
-.orb-sheen { position: absolute; inset: 0; border-radius: 9999px; background: radial-gradient(circle at 30% 24%, rgba(255,255,255,.55), transparent 38%); opacity: .5; }
-[data-theme='dark'] .orb-sheen { opacity: .18; }
-@keyframes orb-spin { to { transform: rotate(360deg); } }
-@keyframes orb-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
-@keyframes orb-a { 0%,100% { transform: translate(0,0) scale(1); } 33% { transform: translate(28%,-18%) scale(1.15); } 66% { transform: translate(14%,22%) scale(.9); } }
-@keyframes orb-b { 0%,100% { transform: translate(0,0) scale(1); } 40% { transform: translate(-24%,26%) scale(1.2); } 75% { transform: translate(18%,30%) scale(.85); } }
-@keyframes orb-c { 0%,100% { transform: translate(0,0) scale(1); } 30% { transform: translate(-30%,-22%) scale(1.1); } 70% { transform: translate(-12%,-34%) scale(1.25); } }
-@media (prefers-reduced-motion: reduce) { .orb, .orb-blob, .orb-rim { animation: none; } }
