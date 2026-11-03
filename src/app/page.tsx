@@ -352,7 +352,7 @@ function SandboxPanel({
           )}
           {files.length > 0 && (
             <button onClick={injectFileTree} className="rounded px-2 py-1 text-[10px]" style={{ background: 'var(--bg-card-hover)', color: dim }} title="Share file tree with AURA">
-              🔗 Share with AURA
+              <span className="inline-flex items-center gap-1.5">{Icons.chat} Share with AURA</span>
             </button>
           )}
         </div>
@@ -457,7 +457,7 @@ function Markdown({ content, onSave, onSaveToSandbox, theme = 'dark' }: { conten
             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium"
             style={{ background: '#f59e0b20', border: '1px solid #f59e0b60', color: '#f59e0b' }}
           >
-            📁 Save all to sandbox
+            <span className="inline-flex items-center gap-1.5">{Icons.folder} Save all to sandbox</span>
           </button>
         )}
       </div>
@@ -567,7 +567,7 @@ try {
                   className="rounded px-2 py-1 text-[11px]"
                   style={{ color: '#f59e0b' }}
                   title={`Save ${filename} to sandbox`}>
-                  📁
+                  {Icons.folder}
                 </button>
               )}
               <button onClick={() => downloadFile(filename, cleanCode)}
@@ -588,7 +588,7 @@ try {
               <div className="flex items-center justify-between px-3 py-1.5 text-xs" style={{ background: theme === 'light' ? '#fafafa' : '#111', borderBottom: `1px solid ${theme === 'light' ? '#e4e4e7' : '#27272a'}` }}>
                 <span className="inline-flex items-center gap-1.5" style={{ color: '#71717a' }}>{Icons.play} {isPy ? (usesGui ? 'GUI App' : 'Python · Pyodide') : isSvg ? 'SVG' : isJs ? 'JavaScript' : isCss ? 'CSS' : isMd ? 'Markdown' : 'HTML'} Preview</span>
                 <div className="flex items-center gap-2">
-                  {usesGui && <span className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: '#7c3aed20', color: '#7c3aed' }}>Click 🚀 to convert</span>}
+                  {usesGui && <span className="rounded px-1.5 py-0.5 text-[10px]" style={{ background: '#7c3aed20', color: '#7c3aed' }}>Use Launch to convert</span>}
                   <button onClick={() => setFullscreen(index)} className="flex items-center gap-1 text-xs" style={{ color: '#71717a' }}>{Icons.expand} Fullscreen</button>
                 </div>
               </div>
@@ -1184,7 +1184,7 @@ export default function AuraPage() {
                                 if (res.ok) { showNotice(`Saved ${filename} to sandbox`); setShowSandbox(true) } else showNotice('Failed to save to sandbox')
                               } : undefined} theme={theme} />
                           }
-                          {!isUser && !isImageMsg && !isThinking && <div className="mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150"><button onClick={() => { navigator.clipboard.writeText(message.content); showNotice('Copied!') }} className="rounded p-1 hover:bg-white/10" title="Copy message" style={{ color: 'var(--text-dim)' }}>{Icons.copy}</button><button onClick={() => updateActiveChat(c => { const msgs = [...c.messages]; const m = msgs[index]; if (m) { const r = m.reactions ?? { up: false, down: false }; msgs[index] = { ...m, reactions: { up: !r.up, down: false } } } return { ...c, messages: msgs } })} className="rounded p-1 text-sm hover:bg-white/10" style={{ color: message.reactions?.up ? 'var(--accent-primary)' : 'var(--text-dim)' }} title="Good response">{Icons.thumbUp}</button><button onClick={() => updateActiveChat(c => { const msgs = [...c.messages]; const m = msgs[index]; if (m) { const r = m.reactions ?? { up: false, down: false }; msgs[index] = { ...m, reactions: { up: false, down: !r.down } } } return { ...c, messages: msgs } })} className="rounded p-1 hover:bg-white/10" style={{ color: message.reactions?.down ? 'var(--accent-primary)' : 'var(--text-dim)' }} title="Bad response">{Icons.thumbDown}</button></div>}
+                          {!isUser && !isImageMsg && !isThinking && <div className={`mt-1 items-center gap-0.5 transition-opacity duration-150 md:mt-1.5 md:flex md:opacity-0 md:group-hover:opacity-100 ${index === (activeChat?.messages.length ?? 0) - 1 ? 'flex' : 'hidden'}`}><button onClick={() => { navigator.clipboard.writeText(message.content); showNotice('Copied!') }} className="rounded p-2 hover:bg-white/10 md:p-1" title="Copy message" style={{ color: 'var(--text-dim)' }}>{Icons.copy}</button><button onClick={() => updateActiveChat(c => { const msgs = [...c.messages]; const m = msgs[index]; if (m) { const r = m.reactions ?? { up: false, down: false }; msgs[index] = { ...m, reactions: { up: !r.up, down: false } } } return { ...c, messages: msgs } })} className="hidden rounded p-1 text-sm hover:bg-white/10 md:inline-flex" style={{ color: message.reactions?.up ? 'var(--accent-primary)' : 'var(--text-dim)' }} title="Good response">{Icons.thumbUp}</button><button onClick={() => updateActiveChat(c => { const msgs = [...c.messages]; const m = msgs[index]; if (m) { const r = m.reactions ?? { up: false, down: false }; msgs[index] = { ...m, reactions: { up: false, down: !r.down } } } return { ...c, messages: msgs } })} className="hidden rounded p-1 hover:bg-white/10 md:inline-flex" style={{ color: message.reactions?.down ? 'var(--accent-primary)' : 'var(--text-dim)' }} title="Bad response">{Icons.thumbDown}</button></div>}
                     {message.attachments?.length ? <div className="mt-2 flex flex-wrap gap-1">{message.attachments.map(file => <span key={file.name} className="rounded px-2 py-1 text-[10px]" style={{ background: 'var(--bg-card-hover)' }}>{Icons.attach} {file.name} · {file.size}</span>)}</div> : null}
                         </div>
                       )}
