@@ -644,6 +644,7 @@ export default function AuraPage() {
   const [cloudKey, setCloudKey] = useState('')
   const [voice, setVoice] = useState('en-US')
   const [webResearch, setWebResearch] = useState(false)
+  const [researchStatus, setResearchStatus] = useState('')
   const [imageMode, setImageMode] = useState(false)
   const [engineStatus, setEngineStatus] = useState('Detecting…')
   const [user, setUser] = useState<SupabaseUser | null>(null)
@@ -1007,7 +1008,11 @@ export default function AuraPage() {
     // Auto-open sandbox in bg for coding tasks (non-admin users get read-only view, admin gets full terminal)
     const isCodingTask = /\b(write|create|build|fix|debug|code|function|class|script|program|component|implement|refactor)\b/i.test(text) && /\b(python|javascript|typescript|react|node|html|css|rust|go|java|sql|bash|shell)\b/i.test(text)
     if (isCodingTask && !showSandbox) setShowSandbox(true)
-      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ messages: outbound, engine, model, temperature, cloudApiKey: cloudKey, webResearch: autoResearch }) })
+      const deepResearch = webResearch && !imageMode
+      setResearchStatus(deepResearch ? 'Starting research' : '')
+      const response = deepResearch
+        ? await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ messages: outbound }) })
+        : await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ messages: outbound, engine, model, temperature, cloudApiKey: cloudKey, webResearch: autoResearch }) })
       if (!response.ok) throw new Error((await response.json().catch(() => ({ error: 'Request failed.' }))).error)
       if (!response.body) throw new Error('The model did not return a stream.')
       const reader = response.body.getReader()
@@ -1025,7 +1030,8 @@ export default function AuraPage() {
           const event = line.trim()
           if (!event.startsWith('data: ') || event === 'data: [DONE]') continue
           try {
-            const packet = JSON.parse(event.slice(6)) as { text?: string; engine?: string }
+            const packet = JSON.parse(event.slice(6)) as { text?: string; engine?: string; status?: string }
+            if (packet.status) { setResearchStatus(packet.status); continue }
             if (!packet.text) continue
             content += packet.text
             responseEngine = packet.engine || responseEngine
@@ -1046,6 +1052,7 @@ export default function AuraPage() {
       })
     } finally {
       abortRef.current = null
+      setResearchStatus('')
       setIsGenerating(false)
     }
   }, [activeChat, attachments, cloudKey, engine, input, isGenerating, model, showNotice, temperature, updateActiveChat, webResearch])
@@ -1192,7 +1199,7 @@ export default function AuraPage() {
                                 <span className="inline-block h-2 w-2 rounded-full animate-bounce" style={{ background: 'var(--text-dim)', animationDelay: '150ms' }} />
                                 <span className="inline-block h-2 w-2 rounded-full animate-bounce" style={{ background: 'var(--text-dim)', animationDelay: '300ms' }} />
                                 {webResearch && index === (activeChat?.messages.length ?? 0) - 1 && (
-                                  <span className="text-xs" style={{ color: 'var(--text-dim)' }}>Searching the web…</span>
+                                  <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{researchStatus ? `${researchStatus}…` : 'Searching the web…'}</span>
                                 )}
                               </span>
                             : <Markdown content={message.content} onSave={!isUser ? saveToLibrary : undefined} onSaveToSandbox={(!isUser && isAdmin) ? async (filename, fileContent) => {
