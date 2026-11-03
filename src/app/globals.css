@@ -1,28 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  --bg-app: #FAFAFA;
-  --bg-sidebar: #FFFFFF;
+  --aura-from: #7C5CFF;
+  --aura-to: #19B8A8;
+  --bg-app: #FBFAF8;
+  --bg-sidebar: #F5F3F0;
   --bg-surface: #FFFFFF;
   --bg-card: #FFFFFF;
-  --bg-card-hover: #F5F5F5;
+  --bg-card-hover: #EFECE8;
   --bg-input: #FFFFFF;
-  --border-subtle: #E5E5E5;
-  --border-focus: #999999;
-  --border-card: #EBEBEB;
-  --text-main: #111111;
-  --text-muted: #666666;
-  --text-dim: #999999;
-  --accent-primary: #111111;
+  --border-subtle: #E7E3DE;
+  --border-focus: #9A94A8;
+  --border-card: #E7E3DE;
+  --text-main: #1B1A22;
+  --text-muted: #5F5C6B;
+  --text-dim: #8F8B9B;
+  --accent-primary: #1B1A22;
 }
 
 [data-theme="dark"] {
-  --bg-app: #0B0B0F;
-  --bg-sidebar: #070709;
-  --bg-surface: #141418;
-  --bg-card: #141418;
-  --bg-card-hover: #1C1C22;
-  --bg-input: #131317;
+  --aura-from: #8F73FF;
+  --aura-to: #2CD3C0;
+  --bg-app: #0D0C14;
+  --bg-sidebar: #09080F;
+  --bg-surface: #16141F;
+  --bg-card: #16141F;
+  --bg-card-hover: #201D2C;
+  --bg-input: #15131D;
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-focus: rgba(255, 255, 255, 0.35);
   --border-card: rgba(255, 255, 255, 0.1);
@@ -169,3 +173,10 @@ body {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Composer: calm hairline, soft lift, aura-coloured focus ring */
+.composer { box-shadow: 0 1px 2px rgba(30, 20, 70, 0.05), 0 10px 28px -12px rgba(60, 40, 140, 0.22); transition: box-shadow 0.2s ease, border-color 0.2s ease; }
+.composer:focus-within { border-color: var(--aura-from) !important; box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.16), 0 10px 28px -12px rgba(60, 40, 140, 0.28); }
+
+/* Never let focus or the keyboard scroll the app shell out of place */
+.app-root, .app-root > main { overflow: clip; }
