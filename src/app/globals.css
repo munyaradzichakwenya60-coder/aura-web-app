@@ -95,6 +95,9 @@ body {
   color: var(--text-muted);
   transition: background 0.15s, color 0.15s;
 }
+@media (max-width: 767px) {
+  .tool { min-width: 40px; min-height: 40px; justify-content: center; }
+}
 .tool:hover {
   background: var(--bg-card-hover);
   color: var(--text-main);
