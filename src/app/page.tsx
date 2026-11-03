@@ -8,7 +8,11 @@ import { getSupabaseConfig } from '@/lib/supabase/config'
 
 type Role = 'user' | 'assistant'
 type Engine = 'auto' | 'local' | 'cloud'
-type Attachment = { name: string; size: string; type: string }
+type Attachment = { name: string; size: string; type: string; text?: string; truncated?: boolean }
+
+// The server cuts each message at 12,000 characters, so the question stays first and the file text is capped well below that.
+const ATTACH_TEXT_LIMIT = 9000
+const READABLE_EXT = /\.(txt|md|csv|json|html?|css|js|py)$/i
 type ImageData = { prompt: string; url: string; revisions: string[]; blobUrl?: string; revisionBlobs?: string[] }
 type Message = { role: Role; content: string; engine?: string; attachments?: Attachment[]; imageData?: ImageData; createdAt: number; reactions?: { up: boolean; down: boolean } }
 type Chat = { id: string; title: string; messages: Message[]; createdAt: number; updatedAt: number; cloudId?: string }
@@ -811,18 +815,25 @@ export default function AuraPage() {
 
   const selectFiles = async (files: FileList | null) => {
     if (!files) return
-    const regularFiles: File[] = []
     const zipFiles: File[] = []
-    for (const f of Array.from(files)) {
-      if (f.name.endsWith('.zip') || f.type === 'application/zip') zipFiles.push(f)
-      else regularFiles.push(f)
+    const added: Attachment[] = []
+    const skipped: string[] = []
+    let budget = ATTACH_TEXT_LIMIT - attachments.reduce((sum, item) => sum + (item.text?.length ?? 0), 0)
+    for (const file of Array.from(files)) {
+      if ((file.name.endsWith('.zip') || file.type === 'application/zip') && isAdmin) { zipFiles.push(file); continue }
+      if (!READABLE_EXT.test(file.name) && !file.type.startsWith('text/')) { skipped.push(file.name); continue }
+      try {
+        const full = await file.text()
+        const text = full.slice(0, Math.max(0, budget))
+        budget -= text.length
+        added.push({ name: file.name, size: `${Math.max(1, Math.round(file.size / 1024))} KB`, type: file.type || 'text/plain', text, truncated: text.length < full.length })
+      } catch { skipped.push(file.name) }
     }
-    if (regularFiles.length > 0) {
-      const next = regularFiles.map(file => ({ name: file.name, size: `${Math.max(1, Math.round(file.size / 1024))} KB`, type: file.type || 'file' }))
-      setAttachments(current => [...current, ...next])
-    }
+    if (added.length > 0) setAttachments(current => [...current, ...added])
+    const cut = added.filter(item => item.truncated).map(item => item.name)
+    if (cut.length) showNotice(`Only the first part of ${cut.join(', ')} was read (about 9,000 characters in total).`)
+    else if (skipped.length) showNotice('AURA can read text files (.txt, .md, .csv, .json) for now. For PDFs or images, paste the text into the chat.')
     if (zipFiles.length > 0) {
-      // Route zips straight to the sandbox
       const dt = new DataTransfer()
       zipFiles.forEach(f => dt.items.add(f))
       await selectFolderOrZip(dt.files)
@@ -964,7 +975,7 @@ export default function AuraPage() {
     try {
       const outbound = updated.slice(-12).map(message => ({
         role: message.role,
-        content: message.attachments?.length ? `${message.content}\n\nAttached file metadata: ${message.attachments.map(file => `${file.name} (${file.size})`).join(', ')}` : message.content,
+        content: message.attachments?.length ? `${message.content}${message.attachments.map(file => file.text ? `\n\n--- Attached file: ${file.name} ---\n${file.text}\n--- end of ${file.name} ---` : `\n\nAttached file (content not readable): ${file.name} (${file.size})`).join('')}` : message.content,
       }))
       // Auto-enable web research for queries about current events, news, or time-sensitive facts
       const needsWebPattern = /\b(today|tonight|this week|this month|this year|right now|currently|latest|recent|news|weather|stock|price|score|result|election|match|game|live|happening|announcement|update|released|launched|died|won|lost|broke|crisis|war|attack|flood|earthquake|hurricane|covid|virus|outbreak)\b/i
@@ -1091,7 +1102,7 @@ export default function AuraPage() {
   </div>
 
   return <div className="app-root flex" style={{ background: 'var(--bg-app)', color: 'var(--text-main)', height: '100dvh', overflow: 'hidden' }}>
-    <input ref={fileInput} type="file" className="hidden" multiple accept="image/*,.txt,.py,.js,.json,.html,.css,.md,.pdf,.csv" onChange={event => selectFiles(event.target.files)} />
+    <input ref={fileInput} type="file" className="hidden" multiple accept=".txt,.md,.csv,.json,.html,.css,.js,.py" onChange={event => selectFiles(event.target.files)} />
     <input ref={folderInput} type="file" className="hidden" multiple
       // @ts-expect-error webkitdirectory not in typings
       webkitdirectory=""
