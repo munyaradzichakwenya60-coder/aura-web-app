@@ -270,7 +270,7 @@ export default function AuthPage() {
                     type="text"
                     value={name}
                     onChange={e => setName(e.target.value)}
-                    placeholder="Munyaradzi"
+                    placeholder="Your full name"
                     required
                     style={inputStyle('name')}
                     onFocus={() => setFocused('name')}
