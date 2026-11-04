@@ -2,6 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
+import { inferTopic, pickGreeting } from '@/lib/greetings'
 import React, { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getSupabaseConfig } from '@/lib/supabase/config'
@@ -1121,15 +1122,14 @@ export default function AuraPage() {
   }
   const filteredChats = chats.filter(chat => `${chat.title} ${chat.messages.map(message => message.content).join(' ')}`.toLowerCase().includes(search.toLowerCase()))
   const userLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'there'
-  // Greeting lines change on each visit. The first render uses a fixed line so server and browser markup match.
+  // Greeting lines change on each visit and follow the user's role and what they usually ask about.
+  // The first render uses a fixed line so server and browser markup match.
   const [homeGreeting, setHomeGreeting] = useState({ lead: 'Hello', sub: 'What would you like to study today?' })
+  const greetingRole = userProfile?.use_case || ''
+  const greetingTopic = useMemo(() => inferTopic(chats.flatMap(chat => chat.messages.filter(m => m.role === 'user').map(m => m.content.slice(0, 600)))), [chats])
   useEffect(() => {
-    const hour = new Date().getHours()
-    const timeLead = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-    const leads = [timeLead, timeLead, "What's cooking,", "What's on your mind,", 'Welcome back,', 'Ready when you are,', 'Hey there,', "Let's get into it,", 'Good to see you,']
-    const subs = ['What would you like to study today?', 'What are we learning today?', 'Pick a topic and we will dig in.', 'Got notes you want to go through?', 'What do you want to understand better?', 'Stuck on something? Let us work it out.', 'What should we tackle first?']
-    setHomeGreeting({ lead: leads[Math.floor(Math.random() * leads.length)], sub: subs[Math.floor(Math.random() * subs.length)] })
-  }, [])
+    setHomeGreeting(pickGreeting({ hour: new Date().getHours(), role: greetingRole, topic: greetingTopic }))
+  }, [greetingRole, greetingTopic])
 
   // Omnibar rendered inline to keep textarea always mounted with stable ref
   const omnibarJsx = (docked: boolean) => <div className={`composer w-full rounded-3xl p-3.5 ${docked ? '' : 'max-w-2xl'}`} style={{ background: 'var(--bg-input)', border: `1px solid ${imageMode ? 'var(--aura-from)' : showSandbox ? '#f59e0b' : 'var(--border-card)'}` }}>
